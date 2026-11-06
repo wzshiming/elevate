@@ -3,7 +3,9 @@ package elevate
 import (
 	"context"
 	"os/exec"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 var appleQuote = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
@@ -24,10 +26,22 @@ var Launch = func(ctx context.Context, exe string, args []string) *exec.Cmd {
 	return exec.CommandContext(ctx, "/usr/bin/osascript", "-e", appleScript(exe, args))
 }
 
-// ClassifyExit explains why the command Launch returned failed, given its exit code and standard error.
-func ClassifyExit(code int, stderr string) error {
-	if strings.Contains(stderr, "(-128)") {
+// classify explains a non-zero osascript exit, given its exit code and standard error.
+func classify(code int, stderr string) error {
+	stderr = strings.TrimRightFunc(stderr, unicode.IsSpace)
+	// osascript reports a failed script as "<range>: execution error: <message> (<error number>)".
+	_, rest, found := strings.Cut(stderr, "execution error: ")
+	paren := strings.LastIndex(rest, "(")
+	if !found || paren < 0 || !strings.HasSuffix(rest, ")") {
+		return &ExitError{Code: code, Stderr: strings.TrimSpace(stderr)}
+	}
+	num, err := strconv.Atoi(rest[paren+1 : len(rest)-1])
+	if err != nil {
+		return &ExitError{Code: code, Stderr: strings.TrimSpace(stderr)}
+	}
+	// -128 is AppleScript's "User canceled".
+	if num == -128 {
 		return ErrDenied
 	}
-	return exitError(code, stderr)
+	return &ExitError{Code: num, Stderr: strings.TrimSpace(rest[:paren])}
 }

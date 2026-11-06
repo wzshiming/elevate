@@ -1,6 +1,7 @@
 package elevate
 
 import (
+	"errors"
 	"slices"
 	"testing"
 )
@@ -22,9 +23,28 @@ func TestLaunchRunsOsascriptWithAdministratorPrivileges(t *testing.T) {
 	}
 }
 
-func TestClassifyExit(t *testing.T) {
-	ttClassifyExit(t, []ttClassifyExitRow{
-		{"user canceled", 1, "0:156: execution error: User canceled. (-128)\n", true},
-		{"other failure", 1, "tun-helper: create tun: operation not permitted\n", false},
-	})
+func TestClassifyUserCanceledIsDenied(t *testing.T) {
+	if err := classify(1, "0:156: execution error: User canceled. (-128)\n"); !errors.Is(err, ErrDenied) {
+		t.Errorf("classify = %v, want ErrDenied", err)
+	}
+}
+
+func TestClassifyReportsOsascriptErrorNumberAndMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		code   int
+		stderr string
+		want   ExitError
+	}{
+		{"helper failure", 1, "0:156: execution error: tun-helper: create tun: operation not permitted (1)\n", ExitError{1, "tun-helper: create tun: operation not permitted"}},
+		{"unparsed stderr", 1, "tun-helper: create tun: operation not permitted\n", ExitError{1, "tun-helper: create tun: operation not permitted"}},
+		{"error number differs from exit code", 1, "0:40: execution error: boom (7)", ExitError{7, "boom"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ee *ExitError
+			if err := classify(tc.code, tc.stderr); !errors.As(err, &ee) || *ee != tc.want {
+				t.Errorf("classify = %#v, want *ExitError %#v", err, tc.want)
+			}
+		})
+	}
 }
