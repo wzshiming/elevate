@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -38,22 +39,63 @@ type shellExecuteInfo struct {
 var procShellExecuteExW = windows.NewLazySystemDLL("shell32.dll").NewProc("ShellExecuteExW")
 
 // IsElevated reports whether the process token is elevated.
-var IsElevated = func() bool { return windows.GetCurrentProcessToken().IsElevated() }
+func IsElevated() bool { return windows.GetCurrentProcessToken().IsElevated() }
 
-// winProc is the handle of a process launched by Launch.
-type winProc windows.Handle
+// winProc is a process launched by Launch; it owns the process handle.
+type winProc struct {
+	ctx  context.Context
+	h    windows.Handle
+	once sync.Once
+	err  error
+}
 
-func (p winProc) Wait() (int, error) {
-	h := windows.Handle(p)
-	defer windows.CloseHandle(h)
-	if _, err := windows.WaitForSingleObject(h, windows.INFINITE); err != nil {
-		return -1, err
+func newWinProc(ctx context.Context, h windows.Handle) *winProc {
+	return &winProc{ctx: ctx, h: h}
+}
+
+// Wait waits for the process to exit or for ctx to be done, whichever comes first, and then closes the process handle; a done ctx does not terminate the elevated process, which keeps running.
+// Later calls return the first call's result.
+func (p *winProc) Wait() error {
+	p.once.Do(func() {
+		p.err = p.wait()
+		windows.CloseHandle(p.h)
+	})
+	return p.err
+}
+
+func (p *winProc) wait() error {
+	done, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		return fmt.Errorf("elevate: CreateEvent: %w", err)
+	}
+	defer windows.CloseHandle(done)
+	fired := make(chan struct{})
+	stop := context.AfterFunc(p.ctx, func() {
+		windows.SetEvent(done)
+		close(fired)
+	})
+	// The event must outlive a SetEvent already under way.
+	defer func() {
+		if !stop() {
+			<-fired
+		}
+	}()
+
+	event, err := windows.WaitForMultipleObjects([]windows.Handle{p.h, done}, false, windows.INFINITE)
+	if err != nil {
+		return fmt.Errorf("elevate: WaitForMultipleObjects: %w", err)
+	}
+	if event != windows.WAIT_OBJECT_0 {
+		return p.ctx.Err()
 	}
 	var code uint32
-	if err := windows.GetExitCodeProcess(h, &code); err != nil {
-		return -1, err
+	if err := windows.GetExitCodeProcess(p.h, &code); err != nil {
+		return fmt.Errorf("elevate: GetExitCodeProcess: %w", err)
 	}
-	return int(code), nil
+	if code != 0 {
+		return &ExitError{Code: int(code)}
+	}
+	return nil
 }
 
 // shellExecuteInfoFor describes running exe with args through the runas verb, hidden and returning the process handle.
@@ -81,8 +123,11 @@ func shellExecuteInfoFor(exe string, args []string) (shellExecuteInfo, error) {
 	return info, nil
 }
 
-// Launch runs exe with args elevated after the user approves the UAC prompt, which it waits for and which ctx cannot cancel.
-var Launch = func(ctx context.Context, exe string, args []string) (Proc, error) {
+// Launch runs exe with args elevated after the user approves the UAC prompt, which it waits for and which ctx cannot cancel once shown; ctx bounds the returned Proc's Wait.
+func Launch(ctx context.Context, exe string, args []string) (Proc, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	info, err := shellExecuteInfoFor(exe, args)
 	if err != nil {
 		return nil, err
@@ -96,18 +141,21 @@ var Launch = func(ctx context.Context, exe string, args []string) (Proc, error) 
 	}
 	ok, _, callErr := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&info)))
 	if ok == 0 {
-		return nil, elevateError(callErr)
+		return nil, shellExecuteError(callErr, info.instApp)
 	}
 	if info.process == 0 {
 		return nil, errors.New("elevate: ShellExecuteEx started no process")
 	}
-	return winProc(info.process), nil
+	return newWinProc(ctx, info.process), nil
 }
 
-// elevateError reports a failed ShellExecuteEx, ErrDenied when the user declined the prompt.
-func elevateError(err error) error {
-	if errors.Is(err, windows.ERROR_CANCELLED) {
+// shellExecuteError reports a failed ShellExecuteEx from its last error, falling back to the SE_ERR code in hInstApp when the last error is unset, and ErrDenied when the user declined the prompt.
+func shellExecuteError(lastErr error, instApp windows.Handle) error {
+	if errors.Is(lastErr, windows.ERROR_CANCELLED) {
 		return ErrDenied
 	}
-	return fmt.Errorf("elevate: ShellExecuteEx runas: %w", err)
+	if lastErr == nil || errors.Is(lastErr, windows.Errno(0)) {
+		return fmt.Errorf("elevate: ShellExecuteEx runas failed with SE_ERR %d", instApp)
+	}
+	return fmt.Errorf("elevate: ShellExecuteEx runas: %w", lastErr)
 }
