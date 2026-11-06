@@ -67,7 +67,8 @@ func TestStartWithDoneCtxStartsNothing(t *testing.T) {
 func TestWaitReturnsCtxErrPromptlyAndReapsLauncher(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	p, err := start(ctx, exec.CommandContext(ctx, "sh", "-c", "sleep 30"), classify)
+	// exec keeps sleep the killed process; dash would fork it as a grandchild holding stderr open.
+	p, err := start(ctx, exec.CommandContext(ctx, "sh", "-c", "exec sleep 30"), classify)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
