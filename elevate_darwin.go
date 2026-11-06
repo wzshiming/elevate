@@ -11,11 +11,11 @@ var appleQuote = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 // appleScript runs exe with args as root once the user approves the administrator prompt.
 func appleScript(exe string, args []string) string {
 	var b strings.Builder
-	b.WriteString(`do shell script quoted form of "` + appleQuote.Replace(exe) + `"`)
+	_, _ = b.WriteString(`do shell script quoted form of "` + appleQuote.Replace(exe) + `"`)
 	for _, a := range args {
-		b.WriteString(` & " " & quoted form of "` + appleQuote.Replace(a) + `"`)
+		_, _ = b.WriteString(` & " " & quoted form of "` + appleQuote.Replace(a) + `"`)
 	}
-	b.WriteString(` with administrator privileges`)
+	_, _ = b.WriteString(` with administrator privileges`)
 	return b.String()
 }
 
