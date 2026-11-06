@@ -14,12 +14,12 @@ func TestAppleScriptQuotesEveryPath(t *testing.T) {
 	}
 }
 
-func TestLaunchRunsOsascriptWithAdministratorPrivileges(t *testing.T) {
+func TestLaunchCmdRunsOsascriptWithAdministratorPrivileges(t *testing.T) {
 	args := []string{"tun-helper", "/tmp/s"}
-	cmd := Launch(t.Context(), "/x/app", args)
+	cmd := launchCmd(t.Context(), "/x/app", args)
 	want := []string{"/usr/bin/osascript", "-e", appleScript("/x/app", args)}
 	if !slices.Equal(cmd.Args, want) {
-		t.Errorf("Launch args = %q, want %q", cmd.Args, want)
+		t.Errorf("launchCmd args = %q, want %q", cmd.Args, want)
 	}
 }
 

@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// Launch returns the command that asks for administrator privileges through pkexec and runs exe with args as root.
-var Launch = func(ctx context.Context, exe string, args []string) *exec.Cmd {
+// launchCmd returns, unstarted, the pkexec command that asks for administrator privileges and runs exe with args as root.
+func launchCmd(ctx context.Context, exe string, args []string) *exec.Cmd {
 	return exec.CommandContext(ctx, "/usr/bin/pkexec", append([]string{exe}, args...)...)
 }
 

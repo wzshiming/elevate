@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-func TestLaunchRunsPkexec(t *testing.T) {
-	cmd := Launch(t.Context(), "/x/app", []string{"tun-helper", "/tmp/s"})
+func TestLaunchCmdRunsPkexec(t *testing.T) {
+	cmd := launchCmd(t.Context(), "/x/app", []string{"tun-helper", "/tmp/s"})
 	want := []string{"/usr/bin/pkexec", "/x/app", "tun-helper", "/tmp/s"}
 	if !slices.Equal(cmd.Args, want) {
-		t.Errorf("Launch args = %q, want %q", cmd.Args, want)
+		t.Errorf("launchCmd args = %q, want %q", cmd.Args, want)
 	}
 }
 

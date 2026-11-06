@@ -12,7 +12,14 @@ import (
 )
 
 // IsElevated reports whether the process runs as root.
-var IsElevated = func() bool { return os.Geteuid() == 0 }
+func IsElevated() bool {
+	return os.Geteuid() == 0
+}
+
+// Launch starts exe with args as root behind the system's administrator prompt, or returns ctx.Err() without starting anything when ctx is already done.
+func Launch(ctx context.Context, exe string, args []string) (Proc, error) {
+	return start(ctx, launchCmd(ctx, exe, args), classify)
+}
 
 // cmdProc is a started launcher whose non-zero exit the platform's classify explains.
 type cmdProc struct {
