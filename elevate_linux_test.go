@@ -14,6 +14,21 @@ func TestLaunchRunsPkexec(t *testing.T) {
 	}
 }
 
+func TestWaitReportsPkexecDenialAsErrDenied(t *testing.T) {
+	for _, script := range []string{"exit 126", "exit 127"} {
+		if err := ttRunSh(t, script); !errors.Is(err, ErrDenied) {
+			t.Errorf("Wait after %q = %v, want ErrDenied", script, err)
+		}
+	}
+}
+
+func TestWaitReportsOtherPkexecExitAsExitError(t *testing.T) {
+	var ee *ExitError
+	if err := ttRunSh(t, "exit 1"); !errors.As(err, &ee) || ee.Code != 1 {
+		t.Errorf("Wait = %#v, want *ExitError with Code 1", err)
+	}
+}
+
 func TestClassifyDismissedOrUnauthorizedIsDenied(t *testing.T) {
 	for _, code := range []int{126, 127} {
 		if err := classify(code, "Error executing command as another user: Request dismissed\n"); !errors.Is(err, ErrDenied) {
